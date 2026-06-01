@@ -14,6 +14,7 @@ let selectedRoom = null;
 let currentUsers = [];
 let roomNameWasEdited = false;
 let historyRenderedForCurrentRoom = false;
+let isLeavingRoom = false;
 
 function createRoom() {
   username = document.getElementById("username").value.trim();
@@ -42,6 +43,7 @@ function createRoom() {
   roomInput.value = requestedRoomName;
 
   joinRoom({
+    roomCode: requestedRoomName,
     roomName: requestedRoomName,
     roomType: requestedRoomType,
     password
@@ -68,16 +70,22 @@ function joinSelectedRoom() {
   }
 
   joinRoom({
+    roomCode: selectedRoom.roomCode,
     roomName: selectedRoom.name,
     roomType: selectedRoom.type,
     password
   });
 }
 
-function joinRoom({ roomName: requestedRoomName, roomType: requestedRoomType, password = "" }) {
+function joinRoom({
+  roomCode: requestedRoomCode,
+  roomName: requestedRoomName,
+  roomType: requestedRoomType,
+  password = ""
+}) {
   socket.emit("join-room", {
-    roomCode: requestedRoomName,
-    roomName: requestedRoomName,
+    roomCode: requestedRoomCode || requestedRoomName,
+    roomName: requestedRoomName || requestedRoomCode,
     username,
     roomType: requestedRoomType,
     password
@@ -103,11 +111,13 @@ function enterChat(room) {
 }
 
 function leaveRoom() {
-  if (roomCode) {
-    socket.emit("leave-room");
+  if (!roomCode) {
+    resetChatScreen();
+    return;
   }
 
-  resetChatScreen();
+  isLeavingRoom = true;
+  socket.emit("leave-room");
 }
 
 function resetChatScreen() {
@@ -117,6 +127,7 @@ function resetChatScreen() {
   currentUsers = [];
   selectedRoom = null;
   historyRenderedForCurrentRoom = false;
+  isLeavingRoom = false;
 
   document.getElementById("messages").innerHTML = "";
   document.getElementById("messageInput").value = "";
@@ -348,10 +359,14 @@ socket.on("active-rooms-update", (rooms) => {
   if (selectedRoom && !activeRooms.some((room) => room.roomCode === selectedRoom.roomCode)) {
     selectedRoom = null;
     renderSelectedRoom();
+  } else if (selectedRoom) {
+    selectedRoom = activeRooms.find((room) => room.roomCode === selectedRoom.roomCode) || selectedRoom;
+    renderSelectedRoom();
   }
 });
 
 socket.on("join-success", (data) => {
+  isLeavingRoom = false;
   hideLoginError();
   enterChat(data);
 
@@ -365,6 +380,7 @@ socket.on("room-history", (history) => {
 });
 
 socket.on("join-error", (data) => {
+  isLeavingRoom = false;
   showLoginError(data.message || "Não foi possível entrar na sala.");
 });
 
@@ -380,12 +396,14 @@ socket.on("system-message", (data) => {
 });
 
 socket.on("users-update", (users) => {
-  currentUsers = users;
+  currentUsers = Array.isArray(users) ? users : [];
   renderUsers();
 });
 
 socket.on("left-room", () => {
-  resetChatScreen();
+  if (isLeavingRoom || roomCode) {
+    resetChatScreen();
+  }
 });
 
 document.getElementById("messageInput").addEventListener("keydown", (e) => {

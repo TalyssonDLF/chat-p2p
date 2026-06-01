@@ -110,10 +110,10 @@ function getRequestedRoomType(roomType, password) {
   return password ? ROOM_TYPES.PRIVATE : ROOM_TYPES.PUBLIC;
 }
 
-function getOrCreateRoom(roomCode, roomType, password) {
+function getOrCreateRoom(roomCode, roomName, roomType, password) {
   if (!rooms[roomCode]) {
     rooms[roomCode] = {
-      name: roomCode,
+      name: roomName || roomCode,
       type: roomType,
       passwordHash: null,
       passwordSalt: null,
@@ -224,7 +224,8 @@ io.on("connection", (socket) => {
 
   socket.on("join-room", ({ roomCode, roomName, username, password, roomType }) => {
     const sanitizedUsername = sanitizeText(username);
-    const sanitizedRoomCode = getRoomCode(roomName || roomCode);
+    const sanitizedRoomCode = getRoomCode(roomCode || roomName);
+    const sanitizedRoomName = sanitizeText(roomName) || sanitizedRoomCode;
     const roomPassword = String(password || "");
     const roomExists = Boolean(rooms[sanitizedRoomCode]);
     const requestedRoomType = roomExists
@@ -248,7 +249,12 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const room = getOrCreateRoom(sanitizedRoomCode, requestedRoomType, roomPassword);
+    const room = getOrCreateRoom(
+      sanitizedRoomCode,
+      sanitizedRoomName,
+      requestedRoomType,
+      roomPassword
+    );
 
     if (roomExists && explicitlyRequestedType && room.type !== explicitlyRequestedType) {
       socket.emit("join-error", {
