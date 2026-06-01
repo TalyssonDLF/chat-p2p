@@ -1,0 +1,33 @@
+# Dependências
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Arquivos de ambiente
+.env
+.env.local
+
+# Mac
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# VS Code
+.vscode/
+
+# JetBrains
+.idea/
+
+# Arquivos temporários
+tmp/
+temp/
+
+# Build
+dist/
+build/
+
+# Coverage
+coverage/

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat P2P</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+
+  <section id="loginScreen">
+    <div class="login-card">
+      <div class="logo">💬</div>
+      <h1>Chat P2P</h1>
+      <p>Entre com seu nome e o código da sala</p>
+
+      <input id="username" type="text" placeholder="Seu nome" />
+      <input id="room" type="text" placeholder="Código da sala" />
+
+      <button onclick="joinRoom()">Entrar na sala</button>
+    </div>
+  </section>
+
+  <section id="chatScreen" class="hidden">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">P2P</div>
+        <div>
+          <h2>Chat P2P</h2>
+          <span>Online agora</span>
+        </div>
+      </div>
+
+      <div class="room-card">
+        <span>Sala</span>
+        <strong id="roomName">---</strong>
+      </div>
+
+      <div class="online-section">
+        <h3>Usuários online</h3>
+        <ul id="usersList"></ul>
+      </div>
+    </aside>
+
+    <main class="chat">
+      <header class="chat-header">
+        <div>
+          <h2 id="chatTitle">Sala</h2>
+          <p>Conversa em tempo real</p>
+        </div>
+      </header>
+
+      <section id="messages" class="messages"></section>
+
+      <footer class="message-bar">
+        <input id="messageInput" type="text" placeholder="Digite sua mensagem..." autocomplete="off" />
+        <button onclick="sendMessage()">➤</button>
+      </footer>
+    </main>
+  </section>
+
+  <script src="script.js"></script>
+</body>
+</html>
