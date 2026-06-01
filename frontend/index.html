@@ -10,9 +10,14 @@
 <body>
 
   <section id="loginScreen">
-    <div class="login-card">
+    <div class="login-card rooms-home">
       <div class="logo">💬</div>
       <h1>Chat P2P</h1>
+      <p>Crie uma sala pública ou privada, ou entre em uma sala ativa.</p>
+
+      <div class="home-grid">
+        <section class="home-panel">
+          <h2>Criar Sala</h2>
       <p>Entre com seu nome, o código e a senha da sala</p>
 
       <input id="username" type="text" placeholder="Seu nome" />
@@ -20,7 +25,53 @@
       <input id="roomPassword" type="password" placeholder="Senha da sala" autocomplete="current-password" />
       <p id="loginError" class="login-error hidden" role="alert"></p>
 
-      <button onclick="joinRoom()">Entrar na sala</button>
+          <label for="username">Nome do usuário</label>
+          <input id="username" type="text" placeholder="Seu nome" autocomplete="name" />
+
+          <label for="room">Nome da sala</label>
+          <input id="room" type="text" placeholder="Sala de você" />
+
+          <label for="roomType">Tipo da sala</label>
+          <select id="roomType">
+            <option value="public">Pública</option>
+            <option value="private">Privada</option>
+          </select>
+
+          <div id="createPasswordGroup" class="hidden">
+            <label for="roomPassword">Senha da sala</label>
+            <input id="roomPassword" type="password" placeholder="Senha da sala" autocomplete="new-password" />
+          </div>
+
+          <button onclick="createRoom()">Criar e entrar</button>
+        </section>
+
+        <section class="home-panel active-rooms-panel">
+          <h2>Entrar em Sala</h2>
+
+          <div class="panel-title-row">
+            <h3>Salas Ativas</h3>
+            <span id="activeRoomsCount">0 salas</span>
+          </div>
+
+          <p class="panel-hint">Clique em uma sala pública para entrar ou selecione uma privada para informar a senha.</p>
+
+          <div id="activeRoomsList" class="active-rooms-list"></div>
+
+          <div id="selectedRoomBox" class="selected-room-box hidden">
+            <strong id="selectedRoomName">---</strong>
+            <span id="selectedRoomType">---</span>
+
+            <div id="joinPasswordGroup" class="hidden">
+              <label for="joinRoomPassword">Senha da sala privada</label>
+              <input id="joinRoomPassword" type="password" placeholder="Senha da sala" autocomplete="current-password" />
+            </div>
+
+            <button onclick="joinSelectedRoom()">Entrar na sala</button>
+          </div>
+        </section>
+      </div>
+
+      <p id="loginError" class="login-error hidden" role="alert"></p>
     </div>
   </section>
 
@@ -37,20 +88,24 @@
       <div class="room-card">
         <span>Sala</span>
         <strong id="roomName">---</strong>
+        <small id="roomTypeLabel">---</small>
       </div>
 
       <div class="online-section">
         <h3>Usuários online</h3>
         <ul id="usersList"></ul>
       </div>
+
+      <button class="leave-button" onclick="leaveRoom()">Sair da sala</button>
     </aside>
 
     <main class="chat">
       <header class="chat-header">
-        <div>
+        <button id="mobileRoomInfoButton" class="room-info-button" onclick="openRoomModal()">
           <h2 id="chatTitle">Sala</h2>
-          <p>Conversa em tempo real</p>
-        </div>
+          <p id="chatSubtitle">Conversa em tempo real</p>
+        </button>
+        <button class="leave-button header-leave" onclick="leaveRoom()">Sair da sala</button>
       </header>
 
       <section id="messages" class="messages"></section>
@@ -61,6 +116,18 @@
       </footer>
     </main>
   </section>
+
+  <div id="roomModal" class="room-modal hidden" role="dialog" aria-modal="true" aria-labelledby="modalRoomName">
+    <div class="room-modal-card">
+      <button class="modal-close" onclick="closeRoomModal()" aria-label="Fechar">×</button>
+      <span class="modal-eyebrow">Sala atual</span>
+      <h2 id="modalRoomName">---</h2>
+      <p id="modalRoomType">---</p>
+      <strong id="modalOnlineCount">0 usuários online</strong>
+      <ul id="modalUsersList" class="modal-users-list"></ul>
+      <button class="leave-button modal-leave" onclick="leaveRoom()">Sair da sala</button>
+    </div>
+  </div>
 
   <script src="script.js"></script>
 </body>
