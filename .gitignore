@@ -31,3 +31,5 @@ build/
 
 # Coverage
 coverage/
+# Dados persistidos em runtime
+backend/data/
