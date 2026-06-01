@@ -95,6 +95,17 @@ select {
   font-weight: 700;
 }
 
+.login-error {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #f87171;
+  border-radius: 12px;
+  background: rgba(248, 113, 113, 0.12);
+  color: #fecaca;
+  font-size: 14px;
+  text-align: left;
+}
+
 .login-card input,
 .login-card select,
 .login-card button {

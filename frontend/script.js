@@ -60,6 +60,13 @@ function joinSelectedRoom() {
 
   if (!username) {
     showLoginError("Informe seu nome para entrar em uma sala.");
+  roomCode = document.getElementById("room").value.trim();
+  const password = document.getElementById("roomPassword").value;
+
+  hideLoginError();
+
+  if (!username || !roomCode || !password) {
+    showLoginError("Preencha seu nome, o código da sala e a senha.");
     return;
   }
 
@@ -88,6 +95,8 @@ function joinRoom({
     roomName: requestedRoomName || requestedRoomCode,
     username,
     roomType: requestedRoomType,
+    roomCode,
+    username,
     password
   });
 }
@@ -101,6 +110,10 @@ function enterChat(room) {
   roomCode = room.roomCode;
   roomName = room.roomName || room.roomCode;
   roomType = room.roomType || ROOM_TYPES.PUBLIC;
+function enterChat(room, history = []) {
+  const messages = document.getElementById("messages");
+
+  messages.innerHTML = "";
 
   document.getElementById("loginScreen").classList.add("hidden");
   document.getElementById("chatScreen").classList.remove("hidden");
@@ -139,6 +152,12 @@ function resetChatScreen() {
   renderUsers();
   closeRoomModal();
   socket.emit("get-active-rooms");
+  document.getElementById("roomName").textContent = room;
+  document.getElementById("chatTitle").textContent = `Sala ${room}`;
+
+  history.forEach(renderMessage);
+  messages.scrollTop = messages.scrollHeight;
+  document.getElementById("messageInput").focus();
 }
 
 function sendMessage() {
@@ -158,6 +177,7 @@ function sendMessage() {
 }
 
 function renderHistory(history = []) {
+function renderMessage(data) {
   const messages = document.getElementById("messages");
 
   if (historyRenderedForCurrentRoom) return;
@@ -188,6 +208,7 @@ function renderMessage(data) {
       <div class="message-meta">
         <strong>${isMine ? "Você" : escapeHTML(data.username)}</strong>
         <small>${escapeHTML(data.time || "")}</small>
+        <small>${data.time || ""}</small>
       </div>
 
       <p>${escapeHTML(data.message)}</p>
@@ -196,6 +217,36 @@ function renderMessage(data) {
 
   messages.appendChild(row);
 }
+
+function showLoginError(message) {
+  const loginError = document.getElementById("loginError");
+
+  loginError.textContent = message;
+  loginError.classList.remove("hidden");
+}
+
+function hideLoginError() {
+  const loginError = document.getElementById("loginError");
+
+  loginError.textContent = "";
+  loginError.classList.add("hidden");
+}
+
+socket.on("join-success", (data) => {
+  roomCode = data.roomCode;
+  enterChat(data.roomCode, data.history);
+});
+
+socket.on("join-error", (data) => {
+  showLoginError(data.message || "Não foi possível entrar na sala.");
+});
+
+socket.on("receive-message", (data) => {
+  const messages = document.getElementById("messages");
+
+  renderMessage(data);
+  messages.scrollTop = messages.scrollHeight;
+});
 
 function renderSystemMessage(message) {
   const messages = document.getElementById("messages");
@@ -447,6 +498,12 @@ document.addEventListener("keydown", (e) => {
 socket.emit("get-active-rooms");
 updateCreatePasswordVisibility();
 updateDefaultRoomName();
+
+document.getElementById("roomPassword").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    joinRoom();
+  }
+});
 
 function escapeHTML(text) {
   return String(text)
