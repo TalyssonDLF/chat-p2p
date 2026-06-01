@@ -15,18 +15,17 @@
       <h1>Chat P2P</h1>
       <p>Crie uma sala pública ou privada, ou entre em uma sala ativa.</p>
 
-      <div class="home-grid">
-        <section class="home-panel">
-          <h2>Criar Sala</h2>
-      <p>Entre com seu nome, o código e a senha da sala</p>
+      <div class="user-panel">
+        <label for="username">Nome do usuário</label>
+        <input id="username" type="text" placeholder="Seu nome" autocomplete="name" />
+      </div>
 
-      <input id="username" type="text" placeholder="Seu nome" />
-      <input id="room" type="text" placeholder="Código da sala" />
-      <input id="roomPassword" type="password" placeholder="Senha da sala" autocomplete="current-password" />
       <p id="loginError" class="login-error hidden" role="alert"></p>
 
-          <label for="username">Nome do usuário</label>
-          <input id="username" type="text" placeholder="Seu nome" autocomplete="name" />
+      <div class="home-grid">
+        <section class="home-panel create-room-panel">
+          <h2>Criar sala</h2>
+          <p class="panel-hint">Defina o nome e o tipo da sala. Você entrará automaticamente após criar.</p>
 
           <label for="room">Nome da sala</label>
           <input id="room" type="text" placeholder="Sala de você" />
@@ -42,36 +41,20 @@
             <input id="roomPassword" type="password" placeholder="Senha da sala" autocomplete="new-password" />
           </div>
 
-          <button onclick="createRoom()">Criar e entrar</button>
+          <button type="button" onclick="createRoom()">Criar sala</button>
         </section>
 
         <section class="home-panel active-rooms-panel">
-          <h2>Entrar em Sala</h2>
-
           <div class="panel-title-row">
-            <h3>Salas Ativas</h3>
+            <h2>Salas ativas</h2>
             <span id="activeRoomsCount">0 salas</span>
           </div>
 
-          <p class="panel-hint">Clique em uma sala pública para entrar ou selecione uma privada para informar a senha.</p>
+          <p class="panel-hint">Entre diretamente em salas públicas ou informe a senha para salas privadas.</p>
 
           <div id="activeRoomsList" class="active-rooms-list"></div>
-
-          <div id="selectedRoomBox" class="selected-room-box hidden">
-            <strong id="selectedRoomName">---</strong>
-            <span id="selectedRoomType">---</span>
-
-            <div id="joinPasswordGroup" class="hidden">
-              <label for="joinRoomPassword">Senha da sala privada</label>
-              <input id="joinRoomPassword" type="password" placeholder="Senha da sala" autocomplete="current-password" />
-            </div>
-
-            <button onclick="joinSelectedRoom()">Entrar na sala</button>
-          </div>
         </section>
       </div>
-
-      <p id="loginError" class="login-error hidden" role="alert"></p>
     </div>
   </section>
 

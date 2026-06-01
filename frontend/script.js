@@ -10,95 +10,77 @@ let roomName = "";
 let roomType = ROOM_TYPES.PUBLIC;
 let username = "";
 let activeRooms = [];
-let selectedRoom = null;
 let currentUsers = [];
 let roomNameWasEdited = false;
 let historyRenderedForCurrentRoom = false;
 let isLeavingRoom = false;
+let pendingPrivateRoomCode = null;
 
 function createRoom() {
-  username = document.getElementById("username").value.trim();
+  username = getUsername();
   const roomInput = document.getElementById("room");
   const requestedRoomName = roomInput.value.trim() || getDefaultRoomName(username);
   const requestedRoomType = document.getElementById("roomType").value;
-  const password = document.getElementById("roomPassword").value;
+  const password = document.getElementById("roomPassword").value.trim();
 
   hideLoginError();
 
   if (!username) {
     showLoginError("Informe seu nome para criar uma sala.");
+    document.getElementById("username").focus();
     return;
   }
 
   if (!requestedRoomName) {
     showLoginError("Informe o nome da sala.");
+    roomInput.focus();
     return;
   }
 
   if (requestedRoomType === ROOM_TYPES.PRIVATE && !password) {
     showLoginError("Informe uma senha para criar uma sala privada.");
+    document.getElementById("roomPassword").focus();
     return;
   }
 
   roomInput.value = requestedRoomName;
 
-  joinRoom({
-    roomCode: requestedRoomName,
+  socket.emit("create-room", {
     roomName: requestedRoomName,
+    username,
     roomType: requestedRoomType,
     password
   });
 }
 
-function joinSelectedRoom() {
-  if (!selectedRoom) return;
-
-  username = document.getElementById("username").value.trim();
-  const password = document.getElementById("joinRoomPassword").value;
-
+function joinActiveRoom(room, password = "") {
+  username = getUsername();
   hideLoginError();
 
   if (!username) {
     showLoginError("Informe seu nome para entrar em uma sala.");
-  roomCode = document.getElementById("room").value.trim();
-  const password = document.getElementById("roomPassword").value;
-
-  hideLoginError();
-
-  if (!username || !roomCode || !password) {
-    showLoginError("Preencha seu nome, o código da sala e a senha.");
+    document.getElementById("username").focus();
     return;
   }
 
-  if (selectedRoom.type === ROOM_TYPES.PRIVATE && !password) {
-    showLoginError("Informe a senha para entrar nesta sala privada.");
-    document.getElementById("joinRoomPassword").focus();
+  if (room.type === ROOM_TYPES.PRIVATE && !password.trim()) {
+    pendingPrivateRoomCode = room.roomCode;
+    renderActiveRooms();
+    const passwordInput = document.getElementById(getJoinPasswordInputId(room.roomCode));
+    passwordInput?.focus();
     return;
   }
 
-  joinRoom({
-    roomCode: selectedRoom.roomCode,
-    roomName: selectedRoom.name,
-    roomType: selectedRoom.type,
-    password
+  socket.emit("join-room", {
+    roomCode: room.roomCode,
+    username,
+    password: password.trim()
   });
 }
 
-function joinRoom({
-  roomCode: requestedRoomCode,
-  roomName: requestedRoomName,
-  roomType: requestedRoomType,
-  password = ""
-}) {
-  socket.emit("join-room", {
-    roomCode: requestedRoomCode || requestedRoomName,
-    roomName: requestedRoomName || requestedRoomCode,
-    username,
-    roomType: requestedRoomType,
-    roomCode,
-    username,
-    password
-  });
+function submitPrivateRoomPassword(room) {
+  const passwordInput = document.getElementById(getJoinPasswordInputId(room.roomCode));
+  joinActiveRoom(room, passwordInput?.value || "");
 }
 
 function enterChat(room) {
@@ -106,14 +88,10 @@ function enterChat(room) {
 
   messages.innerHTML = "";
   historyRenderedForCurrentRoom = false;
-
   roomCode = room.roomCode;
-  roomName = room.roomName || room.roomCode;
-  roomType = room.roomType || ROOM_TYPES.PUBLIC;
-function enterChat(room, history = []) {
-  const messages = document.getElementById("messages");
-
-  messages.innerHTML = "";
+  roomName = room.roomName || room.name || room.roomCode;
+  roomType = room.roomType || room.type || ROOM_TYPES.PUBLIC;
+  pendingPrivateRoomCode = null;
 
   document.getElementById("loginScreen").classList.add("hidden");
   document.getElementById("chatScreen").classList.remove("hidden");
@@ -138,26 +116,17 @@ function resetChatScreen() {
   roomName = "";
   roomType = ROOM_TYPES.PUBLIC;
   currentUsers = [];
-  selectedRoom = null;
   historyRenderedForCurrentRoom = false;
   isLeavingRoom = false;
 
   document.getElementById("messages").innerHTML = "";
   document.getElementById("messageInput").value = "";
-  document.getElementById("joinRoomPassword").value = "";
   document.getElementById("chatScreen").classList.add("hidden");
   document.getElementById("loginScreen").classList.remove("hidden");
 
-  renderSelectedRoom();
   renderUsers();
   closeRoomModal();
   socket.emit("get-active-rooms");
-  document.getElementById("roomName").textContent = room;
-  document.getElementById("chatTitle").textContent = `Sala ${room}`;
-
-  history.forEach(renderMessage);
-  messages.scrollTop = messages.scrollHeight;
-  document.getElementById("messageInput").focus();
 }
 
 function sendMessage() {
@@ -168,7 +137,6 @@ function sendMessage() {
 
   socket.emit("send-message", {
     roomCode,
-    username,
     message
   });
 
@@ -177,7 +145,6 @@ function sendMessage() {
 }
 
 function renderHistory(history = []) {
-function renderMessage(data) {
   const messages = document.getElementById("messages");
 
   if (historyRenderedForCurrentRoom) return;
@@ -190,7 +157,8 @@ function renderMessage(data) {
 
 function renderMessage(data) {
   const messages = document.getElementById("messages");
-  const isMine = data.username === username;
+  const messageUsername = data.username || "Sistema";
+  const isMine = messageUsername === username;
   const row = document.createElement("div");
 
   row.classList.add("message-row");
@@ -199,54 +167,23 @@ function renderMessage(data) {
     row.classList.add("mine");
   }
 
-  const initial = data.username.charAt(0).toUpperCase();
+  const initial = messageUsername.charAt(0).toUpperCase();
 
   row.innerHTML = `
     <div class="avatar">${escapeHTML(initial)}</div>
 
     <div class="message-content">
       <div class="message-meta">
-        <strong>${isMine ? "Você" : escapeHTML(data.username)}</strong>
+        <strong>${isMine ? "Você" : escapeHTML(messageUsername)}</strong>
         <small>${escapeHTML(data.time || "")}</small>
-        <small>${data.time || ""}</small>
       </div>
 
-      <p>${escapeHTML(data.message)}</p>
+      <p>${escapeHTML(data.message || "")}</p>
     </div>
   `;
 
   messages.appendChild(row);
 }
-
-function showLoginError(message) {
-  const loginError = document.getElementById("loginError");
-
-  loginError.textContent = message;
-  loginError.classList.remove("hidden");
-}
-
-function hideLoginError() {
-  const loginError = document.getElementById("loginError");
-
-  loginError.textContent = "";
-  loginError.classList.add("hidden");
-}
-
-socket.on("join-success", (data) => {
-  roomCode = data.roomCode;
-  enterChat(data.roomCode, data.history);
-});
-
-socket.on("join-error", (data) => {
-  showLoginError(data.message || "Não foi possível entrar na sala.");
-});
-
-socket.on("receive-message", (data) => {
-  const messages = document.getElementById("messages");
-
-  renderMessage(data);
-  messages.scrollTop = messages.scrollHeight;
-});
 
 function renderSystemMessage(message) {
   const messages = document.getElementById("messages");
@@ -275,52 +212,40 @@ function renderActiveRooms() {
   }
 
   activeRooms.forEach((room) => {
-    const button = document.createElement("button");
-    button.classList.add("active-room-item");
-    button.type = "button";
-    button.innerHTML = `
-      <span>
+    const card = document.createElement("article");
+    const isPrivate = room.type === ROOM_TYPES.PRIVATE;
+    const showPasswordInput = isPrivate && pendingPrivateRoomCode === room.roomCode;
+
+    card.classList.add("active-room-card");
+    card.innerHTML = `
+      <div class="active-room-info">
         <strong>${escapeHTML(room.name)}</strong>
         <small>${room.onlineCount} ${room.onlineCount === 1 ? "usuário" : "usuários"} online</small>
-      </span>
-      <em class="room-badge ${room.type === ROOM_TYPES.PRIVATE ? "private" : "public"}">
-        ${getRoomTypeLabel(room.type)}
-      </em>
+      </div>
+
+      <em class="room-badge ${isPrivate ? "private" : "public"}">${getRoomTypeLabel(room.type)}</em>
+
+      <div class="active-room-actions">
+        <button type="button" class="join-room-button">Entrar</button>
+      </div>
+
+      <div class="join-password-box ${showPasswordInput ? "" : "hidden"}">
+        <label for="${getJoinPasswordInputId(room.roomCode)}">Senha da sala privada</label>
+        <input id="${getJoinPasswordInputId(room.roomCode)}" type="password" placeholder="Senha da sala" autocomplete="current-password" />
+        <button type="button" class="confirm-private-join-button">Confirmar entrada</button>
+      </div>
     `;
-    button.addEventListener("click", () => selectActiveRoom(room));
-    roomsList.appendChild(button);
+
+    card.querySelector(".join-room-button").addEventListener("click", () => joinActiveRoom(room));
+    card.querySelector(".confirm-private-join-button").addEventListener("click", () => submitPrivateRoomPassword(room));
+    card.querySelector("input")?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        submitPrivateRoomPassword(room);
+      }
+    });
+
+    roomsList.appendChild(card);
   });
-}
-
-function selectActiveRoom(room) {
-  selectedRoom = room;
-
-  document.getElementById("room").value = room.name;
-  document.getElementById("roomType").value = room.type;
-  updateCreatePasswordVisibility();
-
-  renderSelectedRoom();
-
-  if (room.type === ROOM_TYPES.PUBLIC) {
-    joinSelectedRoom();
-  } else {
-    document.getElementById("joinRoomPassword").focus();
-  }
-}
-
-function renderSelectedRoom() {
-  const selectedRoomBox = document.getElementById("selectedRoomBox");
-  const joinPasswordGroup = document.getElementById("joinPasswordGroup");
-
-  if (!selectedRoom) {
-    selectedRoomBox.classList.add("hidden");
-    return;
-  }
-
-  document.getElementById("selectedRoomName").textContent = selectedRoom.name;
-  document.getElementById("selectedRoomType").textContent = getRoomTypeLabel(selectedRoom.type);
-  selectedRoomBox.classList.remove("hidden");
-  joinPasswordGroup.classList.toggle("hidden", selectedRoom.type !== ROOM_TYPES.PRIVATE);
 }
 
 function renderUsers() {
@@ -366,7 +291,7 @@ function closeRoomModal() {
 }
 
 function updateDefaultRoomName() {
-  const name = document.getElementById("username").value.trim();
+  const name = getUsername();
   const roomInput = document.getElementById("room");
 
   if (!roomNameWasEdited || !roomInput.value.trim()) {
@@ -381,8 +306,14 @@ function getDefaultRoomName(name) {
 
 function updateCreatePasswordVisibility() {
   const isPrivate = document.getElementById("roomType").value === ROOM_TYPES.PRIVATE;
+  const passwordGroup = document.getElementById("createPasswordGroup");
+  const passwordInput = document.getElementById("roomPassword");
 
-  document.getElementById("createPasswordGroup").classList.toggle("hidden", !isPrivate);
+  passwordGroup.classList.toggle("hidden", !isPrivate);
+
+  if (!isPrivate) {
+    passwordInput.value = "";
+  }
 }
 
 function showLoginError(message) {
@@ -399,21 +330,26 @@ function hideLoginError() {
   loginError.classList.add("hidden");
 }
 
+function getUsername() {
+  return document.getElementById("username").value.trim();
+}
+
 function getRoomTypeLabel(type) {
   return type === ROOM_TYPES.PRIVATE ? "Privada" : "Pública";
 }
 
+function getJoinPasswordInputId(joinRoomCode) {
+  return `join-password-${btoa(unescape(encodeURIComponent(joinRoomCode))).replaceAll("=", "")}`;
+}
+
 socket.on("active-rooms-update", (rooms) => {
   activeRooms = Array.isArray(rooms) ? rooms : [];
-  renderActiveRooms();
 
-  if (selectedRoom && !activeRooms.some((room) => room.roomCode === selectedRoom.roomCode)) {
-    selectedRoom = null;
-    renderSelectedRoom();
-  } else if (selectedRoom) {
-    selectedRoom = activeRooms.find((room) => room.roomCode === selectedRoom.roomCode) || selectedRoom;
-    renderSelectedRoom();
+  if (pendingPrivateRoomCode && !activeRooms.some((room) => room.roomCode === pendingPrivateRoomCode)) {
+    pendingPrivateRoomCode = null;
   }
+
+  renderActiveRooms();
 });
 
 socket.on("join-success", (data) => {
@@ -421,7 +357,7 @@ socket.on("join-success", (data) => {
   hideLoginError();
   enterChat(data);
 
-  if (Array.isArray(data.history) && data.history.length > 0) {
+  if (Array.isArray(data.history)) {
     renderHistory(data.history);
   }
 });
@@ -457,40 +393,34 @@ socket.on("left-room", () => {
   }
 });
 
-document.getElementById("messageInput").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
+document.getElementById("messageInput").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
     sendMessage();
   }
 });
 
 document.getElementById("username").addEventListener("input", updateDefaultRoomName);
 
-document.getElementById("room").addEventListener("input", (e) => {
-  roomNameWasEdited = Boolean(e.target.value.trim());
+document.getElementById("room").addEventListener("input", (event) => {
+  roomNameWasEdited = Boolean(event.target.value.trim());
 });
 
 document.getElementById("roomType").addEventListener("change", updateCreatePasswordVisibility);
 
-document.getElementById("roomPassword").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
+document.getElementById("roomPassword").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
     createRoom();
   }
 });
 
-document.getElementById("joinRoomPassword").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    joinSelectedRoom();
-  }
-});
-
-document.getElementById("roomModal").addEventListener("click", (e) => {
-  if (e.target.id === "roomModal") {
+document.getElementById("roomModal").addEventListener("click", (event) => {
+  if (event.target.id === "roomModal") {
     closeRoomModal();
   }
 });
 
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
     closeRoomModal();
   }
 });
@@ -499,15 +429,11 @@ socket.emit("get-active-rooms");
 updateCreatePasswordVisibility();
 updateDefaultRoomName();
 
-document.getElementById("roomPassword").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    joinRoom();
-  }
-});
-
 function escapeHTML(text) {
   return String(text)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }

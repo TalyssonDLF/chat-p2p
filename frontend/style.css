@@ -42,7 +42,7 @@ select {
 }
 
 .rooms-home {
-  max-width: 920px;
+  max-width: 1080px;
 }
 
 .logo {
@@ -67,9 +67,23 @@ select {
   margin-bottom: 24px;
 }
 
+.user-panel {
+  max-width: 520px;
+  margin: 24px auto 0;
+  text-align: left;
+}
+
+.user-panel label {
+  display: block;
+  margin: 0 0 8px;
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .home-grid {
   display: grid;
-  grid-template-columns: 1fr 1.15fr;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   gap: 18px;
   margin-top: 24px;
   text-align: left;
@@ -85,6 +99,10 @@ select {
 .home-panel h2 {
   margin: 0 0 18px;
   font-size: 18px;
+}
+
+.panel-title-row h2 {
+  margin: 0;
 }
 
 .home-panel label {
@@ -110,7 +128,7 @@ select {
 .login-card select,
 .login-card button {
   width: 100%;
-  height: 52px;
+  min-height: 52px;
   font-size: 16px;
   border-radius: 14px;
 }
@@ -163,11 +181,6 @@ select {
   margin-bottom: 8px;
 }
 
-.panel-title-row h3 {
-  margin: 0;
-  font-size: 16px;
-}
-
 .panel-title-row span {
   color: #94a3b8;
   font-size: 13px;
@@ -186,28 +199,52 @@ select {
   padding-right: 3px;
 }
 
-.active-room-item {
-  height: auto !important;
-  min-height: 72px;
-  padding: 12px 14px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.active-room-card {
+  padding: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 12px;
-  background: #111827 !important;
-  border: 1px solid #334155 !important;
-  text-align: left;
+  background: #111827;
+  border: 1px solid #334155;
+  border-radius: 16px;
 }
 
-.active-room-item strong,
-.active-room-item small {
+.active-room-info {
+  min-width: 0;
+}
+
+.active-room-info strong,
+.active-room-info small {
   display: block;
 }
 
-.active-room-item small {
+.active-room-info strong {
+  word-break: break-word;
+}
+
+.active-room-info small {
   margin-top: 4px;
   color: #94a3b8;
   font-size: 12px;
+}
+
+.active-room-actions,
+.join-password-box {
+  grid-column: 1 / -1;
+}
+
+.join-password-box {
+  padding-top: 12px;
+  border-top: 1px solid rgba(51, 65, 85, 0.72);
+}
+
+.join-password-box label {
+  margin-top: 0;
+}
+
+.confirm-private-join-button {
+  margin-top: 2px;
 }
 
 .room-badge {
@@ -237,24 +274,6 @@ select {
   text-align: center;
 }
 
-.selected-room-box {
-  margin-top: 14px;
-  padding: 14px;
-  border: 1px solid #334155;
-  border-radius: 16px;
-  background: rgba(15, 23, 42, 0.82);
-}
-
-.selected-room-box strong,
-.selected-room-box span {
-  display: block;
-}
-
-.selected-room-box span {
-  margin: 4px 0 10px;
-  color: #94a3b8;
-  font-size: 13px;
-}
 
 /* CHAT */
 
@@ -699,9 +718,12 @@ select {
     padding: 14px;
   }
 
-  .active-room-item {
-    align-items: flex-start;
-    flex-direction: column;
+  .active-room-card {
+    grid-template-columns: 1fr;
+  }
+
+  .room-badge {
+    justify-self: start;
   }
 
   .message-row {
