@@ -1,8 +1,20 @@
 const socket = io("https://chat-p2p-v9l6.onrender.com");
 
+const DEMO_MODE = true;
 const ROOM_TYPES = {
   PUBLIC: "public",
   PRIVATE: "private"
+};
+const RSA_KEY_SIZE = 2048;
+const AES_KEY_SIZE = 256;
+const KEY_PREVIEW_SIZE = 14;
+
+const LOG_STYLES = {
+  success: "color: #16a34a; font-weight: 700;",
+  info: "color: #2563eb; font-weight: 700;",
+  encrypted: "color: #dc2626; font-weight: 700;",
+  security: "color: #ca8a04; font-weight: 700;",
+  neutral: "color: inherit;"
 };
 
 let roomCode = "";
@@ -15,6 +27,11 @@ let roomNameWasEdited = false;
 let historyRenderedForCurrentRoom = false;
 let isLeavingRoom = false;
 let pendingPrivateRoomCode = null;
+// Estado criptográfico mantido somente no navegador de cada participante.
+let rsaKeyPair = null;
+let exportedPublicKey = "";
+let publicKeysByUserId = new Map();
+let aesSessionsByUserId = new Map();
 
 function createRoom() {
   username = getUsername();
@@ -83,7 +100,7 @@ function submitPrivateRoomPassword(room) {
   joinActiveRoom(room, passwordInput?.value || "");
 }
 
-function enterChat(room) {
+async function enterChat(room) {
   const messages = document.getElementById("messages");
 
   messages.innerHTML = "";
@@ -93,11 +110,14 @@ function enterChat(room) {
   roomType = room.roomType || room.type || ROOM_TYPES.PUBLIC;
   pendingPrivateRoomCode = null;
 
+  resetSecurityState();
+
   document.getElementById("loginScreen").classList.add("hidden");
   document.getElementById("chatScreen").classList.remove("hidden");
 
   updateRoomLabels();
   closeRoomModal();
+  await initializeRoomSecurity();
   document.getElementById("messageInput").focus();
 }
 
@@ -118,6 +138,7 @@ function resetChatScreen() {
   currentUsers = [];
   historyRenderedForCurrentRoom = false;
   isLeavingRoom = false;
+  resetSecurityState();
 
   document.getElementById("messages").innerHTML = "";
   document.getElementById("messageInput").value = "";
@@ -129,19 +150,56 @@ function resetChatScreen() {
   socket.emit("get-active-rooms");
 }
 
-function sendMessage() {
+async function sendMessage() {
   const input = document.getElementById("messageInput");
   const message = input.value.trim();
 
   if (!message || !roomCode) return;
 
-  socket.emit("send-message", {
-    roomCode,
-    message
-  });
+  const recipients = currentUsers.filter((user) => user.id !== socket.id);
 
-  input.value = "";
-  input.focus();
+  if (recipients.length === 0) {
+    renderMessage({ username, message, time: getLocalFormattedTime() });
+    input.value = "";
+    input.focus();
+    return;
+  }
+
+  try {
+    const encryptedMessages = await Promise.all(
+      recipients.map(async (recipient) => {
+        const session = aesSessionsByUserId.get(recipient.id);
+
+        if (!session) {
+          throw new Error(`Chave AES ainda não negociada com ${recipient.username}. Aguarde alguns segundos.`);
+        }
+
+        const encryptedPayload = await encryptMessageForSession(message, session.key);
+        const signature = await signMessage(message);
+
+        return {
+          recipientId: recipient.id,
+          encryptedMessage: encryptedPayload.encryptedMessage,
+          iv: encryptedPayload.iv,
+          signature
+        };
+      })
+    );
+
+    logMessageSend(message, encryptedMessages[0]);
+
+    socket.emit("send-message", {
+      roomCode,
+      encryptedMessages
+    });
+
+    renderMessage({ username, message, time: getLocalFormattedTime() });
+    input.value = "";
+    input.focus();
+  } catch (error) {
+    console.error("Não foi possível criptografar a mensagem:", error);
+    renderSystemMessage(error.message || "Não foi possível criptografar a mensagem.");
+  }
 }
 
 function renderHistory(history = []) {
@@ -150,7 +208,11 @@ function renderHistory(history = []) {
   if (historyRenderedForCurrentRoom) return;
 
   messages.innerHTML = "";
-  history.forEach(renderMessage);
+  history.forEach((message) => {
+    if (message.message) {
+      renderMessage(message);
+    }
+  });
   historyRenderedForCurrentRoom = true;
   messages.scrollTop = messages.scrollHeight;
 }
@@ -229,7 +291,7 @@ function renderActiveRooms() {
         <button type="button" class="join-room-button">Entrar</button>
       </div>
 
-      <div class="join-password-box ${showPasswordInput ? "" : "hidden"}">
+      <div class="private-join ${showPasswordInput ? "" : "hidden"}">
         <label for="${getJoinPasswordInputId(room.roomCode)}">Senha da sala privada</label>
         <input id="${getJoinPasswordInputId(room.roomCode)}" type="password" placeholder="Senha da sala" autocomplete="current-password" />
         <button type="button" class="confirm-private-join-button">Confirmar entrada</button>
@@ -342,6 +404,343 @@ function getJoinPasswordInputId(joinRoomCode) {
   return `join-password-${btoa(unescape(encodeURIComponent(joinRoomCode))).replaceAll("=", "")}`;
 }
 
+function getLocalFormattedTime() {
+  return new Date().toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function resetSecurityState() {
+  rsaKeyPair = null;
+  exportedPublicKey = "";
+  publicKeysByUserId = new Map();
+  aesSessionsByUserId = new Map();
+}
+
+async function initializeRoomSecurity() {
+  // Fluxo automático da demonstração: gerar RSA localmente e anunciar a chave pública ao entrar.
+  if (!window.crypto?.subtle) {
+    renderSystemMessage("Este navegador não oferece Web Crypto API para a demonstração segura.");
+    return;
+  }
+
+  logSecurityInitializationStart();
+
+  rsaKeyPair = await crypto.subtle.generateKey(
+    {
+      name: "RSA-OAEP",
+      modulusLength: RSA_KEY_SIZE,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256"
+    },
+    true,
+    ["encrypt", "decrypt"]
+  );
+
+  exportedPublicKey = await exportPublicKey(rsaKeyPair.publicKey);
+  logSecurityInitializationComplete();
+  logPublicKeySent(exportedPublicKey);
+
+  socket.emit("public-key", {
+    roomCode,
+    publicKey: exportedPublicKey
+  });
+}
+
+async function handlePublicKeyReceived({ userId, username: keyOwner, publicKey }) {
+  if (!userId || userId === socket.id || !publicKey || !roomCode) return;
+
+  publicKeysByUserId.set(userId, publicKey);
+  logPublicKeyReceived(publicKey);
+
+  if (socket.id > userId && !aesSessionsByUserId.has(userId)) {
+    await createAndSendSessionKey(userId, keyOwner, publicKey);
+  }
+}
+
+async function createAndSendSessionKey(recipientId, recipientName, recipientPublicKey) {
+  // Apenas um lado do par cria a AES; ela trafega criptografada com RSA-OAEP do destinatário.
+  const aesKey = await crypto.subtle.generateKey(
+    {
+      name: "AES-GCM",
+      length: AES_KEY_SIZE
+    },
+    true,
+    ["encrypt", "decrypt"]
+  );
+  const rawAesKey = await crypto.subtle.exportKey("raw", aesKey);
+  const aesKeyHex = arrayBufferToHex(rawAesKey);
+  const importedPublicKey = await importPublicKey(recipientPublicKey);
+  const encryptedAesKey = await crypto.subtle.encrypt(
+    { name: "RSA-OAEP" },
+    importedPublicKey,
+    rawAesKey
+  );
+  const encryptedAesKeyBase64 = arrayBufferToBase64(encryptedAesKey);
+
+  aesSessionsByUserId.set(recipientId, { key: aesKey, hex: aesKeyHex });
+  logAesGenerated(aesKeyHex);
+  logRsaEncryption(aesKeyHex, encryptedAesKeyBase64);
+
+  socket.emit("encrypted-aes-key", {
+    roomCode,
+    recipientId,
+    encryptedAesKey: encryptedAesKeyBase64
+  });
+
+  if (recipientName) {
+    demoLog(`Chave AES de sessão enviada para ${recipientName}.`, "success");
+  }
+}
+
+async function handleEncryptedAesKey({ senderId, encryptedAesKey }) {
+  if (!senderId || senderId === socket.id || !encryptedAesKey || !rsaKeyPair) return;
+
+  const encryptedKeyBuffer = base64ToArrayBuffer(encryptedAesKey);
+  const rawAesKey = await crypto.subtle.decrypt(
+    { name: "RSA-OAEP" },
+    rsaKeyPair.privateKey,
+    encryptedKeyBuffer
+  );
+  const aesKey = await crypto.subtle.importKey(
+    "raw",
+    rawAesKey,
+    { name: "AES-GCM" },
+    true,
+    ["encrypt", "decrypt"]
+  );
+  const aesKeyHex = arrayBufferToHex(rawAesKey);
+
+  aesSessionsByUserId.set(senderId, { key: aesKey, hex: aesKeyHex });
+  logRsaDecryption(encryptedAesKey, aesKeyHex);
+}
+
+async function encryptMessageForSession(message, aesKey) {
+  // AES-GCM garante confidencialidade e autenticação do ciphertext de cada destinatário.
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encryptedBuffer = await crypto.subtle.encrypt(
+    {
+      name: "AES-GCM",
+      iv
+    },
+    aesKey,
+    new TextEncoder().encode(message)
+  );
+
+  return {
+    encryptedMessage: arrayBufferToHex(encryptedBuffer),
+    iv: arrayBufferToBase64(iv)
+  };
+}
+
+async function decryptIncomingMessage(data) {
+  const session = aesSessionsByUserId.get(data.senderId);
+
+  if (!session) {
+    throw new Error("Chave AES de sessão não encontrada para o remetente.");
+  }
+
+  const decryptedBuffer = await crypto.subtle.decrypt(
+    {
+      name: "AES-GCM",
+      iv: base64ToArrayBuffer(data.iv)
+    },
+    session.key,
+    hexToArrayBuffer(data.encryptedMessage)
+  );
+
+  return new TextDecoder().decode(decryptedBuffer);
+}
+
+async function signMessage(message) {
+  const signingKeyPair = await getSigningKeyPair();
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(message));
+  const signature = await crypto.subtle.sign(
+    {
+      name: "RSA-PSS",
+      saltLength: 32
+    },
+    signingKeyPair.privateKey,
+    hash
+  );
+
+  return arrayBufferToBase64(signature);
+}
+
+async function verifyMessageSignature(message, signature, senderId) {
+  const senderPublicKey = publicKeysByUserId.get(senderId);
+
+  if (!senderPublicKey || !signature) return false;
+
+  const publicKey = await importSigningPublicKey(senderPublicKey);
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(message));
+
+  return crypto.subtle.verify(
+    {
+      name: "RSA-PSS",
+      saltLength: 32
+    },
+    publicKey,
+    base64ToArrayBuffer(signature),
+    hash
+  );
+}
+
+async function getSigningKeyPair() {
+  // A demonstração usa um par RSA-OAEP para sigilo e deriva uma chave RSA-PSS
+  // exportável equivalente a partir do mesmo material público/privado para mostrar autenticidade.
+  const privateJwk = await crypto.subtle.exportKey("jwk", rsaKeyPair.privateKey);
+  const publicJwk = await crypto.subtle.exportKey("jwk", rsaKeyPair.publicKey);
+
+  return {
+    privateKey: await crypto.subtle.importKey(
+      "jwk",
+      { ...privateJwk, alg: "PS256", key_ops: ["sign"] },
+      { name: "RSA-PSS", hash: "SHA-256" },
+      false,
+      ["sign"]
+    ),
+    publicKey: await crypto.subtle.importKey(
+      "jwk",
+      { ...publicJwk, alg: "PS256", key_ops: ["verify"] },
+      { name: "RSA-PSS", hash: "SHA-256" },
+      false,
+      ["verify"]
+    )
+  };
+}
+
+async function exportPublicKey(publicKey) {
+  const spki = await crypto.subtle.exportKey("spki", publicKey);
+  return arrayBufferToBase64(spki);
+}
+
+async function importPublicKey(publicKeyBase64) {
+  return crypto.subtle.importKey(
+    "spki",
+    base64ToArrayBuffer(publicKeyBase64),
+    {
+      name: "RSA-OAEP",
+      hash: "SHA-256"
+    },
+    true,
+    ["encrypt"]
+  );
+}
+
+async function importSigningPublicKey(publicKeyBase64) {
+  const publicJwk = await crypto.subtle.exportKey("jwk", await importPublicKey(publicKeyBase64));
+
+  return crypto.subtle.importKey(
+    "jwk",
+    { ...publicJwk, alg: "PS256", key_ops: ["verify"] },
+    { name: "RSA-PSS", hash: "SHA-256" },
+    false,
+    ["verify"]
+  );
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+
+  return btoa(binary);
+}
+
+function base64ToArrayBuffer(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes.buffer;
+}
+
+function arrayBufferToHex(buffer) {
+  return [...new Uint8Array(buffer)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function hexToArrayBuffer(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+
+  for (let index = 0; index < hex.length; index += 2) {
+    bytes[index / 2] = Number.parseInt(hex.slice(index, index + 2), 16);
+  }
+
+  return bytes.buffer;
+}
+
+function preview(value, size = KEY_PREVIEW_SIZE) {
+  return `${String(value || "").slice(0, size)}...`;
+}
+
+function demoLog(message, style = "info") {
+  if (!DEMO_MODE) return;
+  console.log(`%c${message}`, LOG_STYLES[style] || LOG_STYLES.info);
+}
+
+function logSecurityInitializationStart() {
+  demoLog("=================================================\n🔐 INICIALIZAÇÃO DE SEGURANÇA\n=============================\n\nGerando par de chaves RSA...", "security");
+}
+
+function logSecurityInitializationComplete() {
+  demoLog("✓ Chave pública criada", "success");
+  demoLog("✓ Chave privada criada", "success");
+}
+
+function logPublicKeySent(publicKey) {
+  demoLog("=================================================\n📤 TROCA DE CHAVES\n==================", "security");
+  demoLog("✓ Chave pública enviada", "success");
+  demoLog(`PUBLIC KEY:\n${preview(publicKey)}`, "info");
+}
+
+function logPublicKeyReceived(publicKey) {
+  demoLog("=================================================\n📤 TROCA DE CHAVES\n==================", "security");
+  demoLog("✓ Chave pública recebida", "success");
+  demoLog(`PUBLIC KEY:\n${preview(publicKey)}`, "info");
+}
+
+function logAesGenerated(aesKeyHex) {
+  demoLog("=================================================\n🔑 CHAVE DE SESSÃO\n==================", "security");
+  demoLog(`AES gerada:\n${preview(aesKeyHex)}`, "info");
+}
+
+function logRsaEncryption(aesKeyHex, encryptedAesKey) {
+  demoLog("=================================================\n🔒 RSA\n======", "security");
+  demoLog(`AES original:\n${preview(aesKeyHex)}`, "info");
+  demoLog(`AES criptografada:\n${preview(encryptedAesKey)}`, "encrypted");
+}
+
+function logRsaDecryption(encryptedAesKey, aesKeyHex) {
+  demoLog("=================================================\n🔓 RSA\n======", "security");
+  demoLog(`AES recebida:\n${preview(encryptedAesKey)}`, "encrypted");
+  demoLog(`AES recuperada:\n${preview(aesKeyHex)}`, "info");
+}
+
+function logMessageSend(originalMessage, encryptedPayload) {
+  demoLog("=================================================\n📨 ENVIO\n========", "security");
+  demoLog(`Mensagem original:\n${originalMessage}`, "info");
+  demoLog(`Mensagem criptografada:\n${preview(encryptedPayload.encryptedMessage, 26)}`, "encrypted");
+  demoLog("Payload enviado:", "info");
+  demoLog(JSON.stringify({ encryptedMessage: preview(encryptedPayload.encryptedMessage, 26) }, null, 2), "encrypted");
+}
+
+function logMessageReceive(data, decryptedMessage, isSignatureValid) {
+  demoLog("=================================================\n📩 RECEBIMENTO\n==============", "security");
+  demoLog(`Payload recebido:\n${preview(data.encryptedMessage, 26)}`, "encrypted");
+  demoLog(`Mensagem descriptografada:\n${decryptedMessage}`, "info");
+  demoLog(isSignatureValid ? "✓ Assinatura válida" : "✗ Assinatura inválida", isSignatureValid ? "success" : "encrypted");
+}
+
 socket.on("active-rooms-update", (rooms) => {
   activeRooms = Array.isArray(rooms) ? rooms : [];
 
@@ -352,10 +751,10 @@ socket.on("active-rooms-update", (rooms) => {
   renderActiveRooms();
 });
 
-socket.on("join-success", (data) => {
+socket.on("join-success", async (data) => {
   isLeavingRoom = false;
   hideLoginError();
-  enterChat(data);
+  await enterChat(data);
 
   if (Array.isArray(data.history)) {
     renderHistory(data.history);
@@ -371,11 +770,49 @@ socket.on("join-error", (data) => {
   showLoginError(data.message || "Não foi possível entrar na sala.");
 });
 
-socket.on("receive-message", (data) => {
+socket.on("receive-message", async (data) => {
   const messages = document.getElementById("messages");
 
-  renderMessage(data);
+  if (data.encryptedMessage) {
+    try {
+      const decryptedMessage = await decryptIncomingMessage(data);
+      const isSignatureValid = await verifyMessageSignature(decryptedMessage, data.signature, data.senderId);
+
+      logMessageReceive(data, decryptedMessage, isSignatureValid);
+      renderMessage({
+        username: data.username,
+        message: decryptedMessage,
+        time: data.time
+      });
+    } catch (error) {
+      console.error("Não foi possível descriptografar a mensagem:", error);
+      renderSystemMessage("Mensagem criptografada recebida, mas não foi possível descriptografar.");
+    }
+  } else {
+    renderMessage(data);
+  }
+
   messages.scrollTop = messages.scrollHeight;
+});
+
+socket.on("public-key", (data) => {
+  handlePublicKeyReceived(data).catch((error) => {
+    console.error("Falha na troca de chave pública:", error);
+  });
+});
+
+socket.on("existing-public-keys", (keys = []) => {
+  keys.forEach((keyData) => {
+    handlePublicKeyReceived(keyData).catch((error) => {
+      console.error("Falha ao processar chave pública existente:", error);
+    });
+  });
+});
+
+socket.on("encrypted-aes-key", (data) => {
+  handleEncryptedAesKey(data).catch((error) => {
+    console.error("Falha ao descriptografar chave AES:", error);
+  });
 });
 
 socket.on("system-message", (data) => {
@@ -384,6 +821,15 @@ socket.on("system-message", (data) => {
 
 socket.on("users-update", (users) => {
   currentUsers = Array.isArray(users) ? users : [];
+  const onlineUserIds = new Set(currentUsers.map((user) => user.id));
+
+  publicKeysByUserId.forEach((_, userId) => {
+    if (!onlineUserIds.has(userId)) {
+      publicKeysByUserId.delete(userId);
+      aesSessionsByUserId.delete(userId);
+    }
+  });
+
   renderUsers();
 });
 

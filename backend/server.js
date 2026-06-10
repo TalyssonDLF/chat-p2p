@@ -151,6 +151,17 @@ function getUsersInRoom(roomCode) {
   return users[roomCode] || [];
 }
 
+function getPublicKeysInRoom(roomCode, excludedSocketId) {
+  // O servidor apenas coordena a descoberta; as chaves privadas nunca saem do navegador.
+  return getUsersInRoom(roomCode)
+    .filter((user) => user.id !== excludedSocketId && user.publicKey)
+    .map((user) => ({
+      userId: user.id,
+      username: user.username,
+      publicKey: user.publicKey
+    }));
+}
+
 function getActiveRooms() {
   return Object.entries(users)
     .filter(([, roomUsers]) => roomUsers.length > 0)
@@ -268,7 +279,8 @@ function addSocketToRoom(socket, sanitizedRoomCode, sanitizedUsername, room) {
   } else {
     users[sanitizedRoomCode].push({
       id: socket.id,
-      username: sanitizedUsername
+      username: sanitizedUsername,
+      publicKey: null
     });
   }
 
@@ -342,15 +354,88 @@ io.on("connection", (socket) => {
     socket.emit("left-room");
   });
 
-  socket.on("send-message", ({ roomCode, message }) => {
+  socket.on("public-key", ({ roomCode, publicKey }) => {
     const sanitizedRoomCode = sanitizeText(roomCode);
-    const sanitizedMessage = sanitizeText(message);
+    const sanitizedPublicKey = sanitizeText(publicKey);
 
     if (
       socket.data.roomCode !== sanitizedRoomCode ||
       !socket.data.username ||
-      !sanitizedMessage
+      !sanitizedPublicKey ||
+      !users[sanitizedRoomCode]
     ) {
+      return;
+    }
+
+    users[sanitizedRoomCode] = users[sanitizedRoomCode].map((user) =>
+      user.id === socket.id ? { ...user, publicKey: sanitizedPublicKey } : user
+    );
+
+    socket.emit("existing-public-keys", getPublicKeysInRoom(sanitizedRoomCode, socket.id));
+    socket.to(sanitizedRoomCode).emit("public-key", {
+      userId: socket.id,
+      username: socket.data.username,
+      publicKey: sanitizedPublicKey
+    });
+  });
+
+  socket.on("encrypted-aes-key", ({ roomCode, recipientId, encryptedAesKey }) => {
+    // Relay ponto a ponto da AES já criptografada com RSA para o destinatário.
+    const sanitizedRoomCode = sanitizeText(roomCode);
+    const sanitizedRecipientId = sanitizeText(recipientId);
+    const sanitizedEncryptedAesKey = sanitizeText(encryptedAesKey);
+
+    if (
+      socket.data.roomCode !== sanitizedRoomCode ||
+      !socket.data.username ||
+      !sanitizedRecipientId ||
+      !sanitizedEncryptedAesKey
+    ) {
+      return;
+    }
+
+    io.to(sanitizedRecipientId).emit("encrypted-aes-key", {
+      senderId: socket.id,
+      username: socket.data.username,
+      encryptedAesKey: sanitizedEncryptedAesKey
+    });
+  });
+
+  socket.on("send-message", ({ roomCode, message, encryptedMessages }) => {
+    const sanitizedRoomCode = sanitizeText(roomCode);
+
+    if (socket.data.roomCode !== sanitizedRoomCode || !socket.data.username) {
+      return;
+    }
+
+    if (Array.isArray(encryptedMessages) && encryptedMessages.length > 0) {
+      // Cada destinatário recebe somente o ciphertext criado com a AES negociada para aquele par.
+      const time = getFormattedTime();
+
+      encryptedMessages.forEach((encryptedMessageData) => {
+        const recipientId = sanitizeText(encryptedMessageData.recipientId);
+        const encryptedMessage = sanitizeText(encryptedMessageData.encryptedMessage);
+        const iv = sanitizeText(encryptedMessageData.iv);
+        const signature = sanitizeText(encryptedMessageData.signature);
+
+        if (!recipientId || !encryptedMessage || !iv || !signature) return;
+
+        io.to(recipientId).emit("receive-message", {
+          senderId: socket.id,
+          username: socket.data.username,
+          encryptedMessage,
+          iv,
+          signature,
+          time
+        });
+      });
+
+      return;
+    }
+
+    const sanitizedMessage = sanitizeText(message);
+
+    if (!sanitizedMessage) {
       return;
     }
 
